@@ -9,15 +9,17 @@ timeout. Read README.md for the full background.
 
 The repo folder lives on the user's device. To run the tests:
 
-1. Stage `server.py`, `run_test.sh`, and `Makefile` from the repo folder
-   into your session environment, copy them into a working directory, and
-   `chmod +x run_test.sh`.
-2. Run `make test-all` there (or a single target; see README). The `claude`
-   CLI inside your environment is the same engine Cowork uses, so this is
-   a valid test of the Cowork client.
+1. Stage `server.py` and `testbench.py` from the repo folder into your
+   session environment and copy them into a working directory (no chmod
+   needed; everything runs via python3).
+2. Run `python3 testbench.py all` there (or one scenario; see README). The
+   `claude` CLI inside your environment is the same engine Cowork uses, so
+   this is a valid test of the Cowork client.
 3. Report back per scenario: the client's outcome line, whether the server
    timeline shows events being delivered, and the verdict line. State the
-   client version printed at the top of each run.
+   client version printed at the top of each run. The
+   `results/<scenario>_result.json` files carry the same facts in
+   structured form.
 4. Results land in `./results/` in YOUR environment, not on the user's
    machine. Offer to send the log files to the user; do not commit them to
    the repo (gitignored by design).
@@ -34,7 +36,7 @@ Just run `make test-all` in the repo root. Same reporting guidance as above.
 - Do not "fix" a failing verdict: a timeout in test-progress or
   test-sse-comments is a genuine finding about the client, not a bug in
   this rig. test-silent timing out is the expected control result.
-- Do not modify server.py, run_test.sh, or the Makefile unless the user
+- Do not modify server.py, testbench.py, or the Makefile unless the user
   explicitly asks for changes to the rig itself.
 - If a port is busy, pass PORT=<other> rather than editing files.
 - Never expose the server publicly (tunnels, connectors) on your own

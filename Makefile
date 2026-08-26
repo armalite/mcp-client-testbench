@@ -1,4 +1,4 @@
-# MCP client testbench. See README.md.
+# MCP client testbench. See README.md. Thin wrapper around testbench.py.
 #
 # Tunables (pass as env or make vars): TIMEOUT_MS, DURATION, INTERVAL, PORT, CLAUDE_MODEL
 #   e.g.  make test-progress TIMEOUT_MS=60000 DURATION=90
@@ -20,23 +20,22 @@ help:
 	@echo "  make clean              delete results/"
 	@echo ""
 	@echo "Tunables: TIMEOUT_MS (60000) DURATION (90) INTERVAL (5) PORT (8765) CLAUDE_MODEL (haiku)"
+	@echo "Direct use: python3 testbench.py <headers|silent|progress|sse-comments|all> [--help]"
 
 test-headers:
-	@./run_test.sh headers fast
-	@echo "--- headers the client sent (from results/headers_server.log):"
-	@grep -iE "    (accept|content-type|user-agent)" results/headers_server.log | sed 's/^[^ ]* *//' | sort -u | sed 's/^/    /'
+	@python3 testbench.py headers
 
 test-silent:
-	@./run_test.sh silent silent
+	@python3 testbench.py silent
 
 test-progress:
-	@./run_test.sh progress progress
+	@python3 testbench.py progress
 
 test-sse-comments:
-	@./run_test.sh sse-comments sse-comments
+	@python3 testbench.py sse-comments
 
-test-all: test-headers test-silent test-progress test-sse-comments
-	@echo "=== all scenarios complete; full logs in results/ ==="
+test-all:
+	@python3 testbench.py all
 
 server:
 	python3 server.py --mode $${MODE:-progress} --duration $${DURATION:-90} --interval $${INTERVAL:-5}

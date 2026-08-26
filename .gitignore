@@ -1,2 +1,13 @@
+# test output
 results/
+
+# python
 __pycache__/
+*.pyc
+.venv/
+venv/
+
+# editors / OS
+.DS_Store
+.idea/
+.vscode/

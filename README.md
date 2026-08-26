@@ -27,7 +27,9 @@ Every `make test-*` target does the same five things:
 4. The server logs every request's headers and a timestamped timeline of
    every event it sends and when the client hangs up.
 5. Prints: what the client reported, the server's timeline, and a one-line
-   verdict. Full logs go to `./results/` (gitignored).
+   verdict. Full logs plus a structured `<scenario>_result.json` (verdict,
+   client version, timings, events sent) go to `./results/` (gitignored),
+   so runs can be compared across client versions.
 
 ## The scenarios
 
@@ -136,6 +138,7 @@ instrument at that platform:
 ## Layout
 
 - `server.py` - the configurable MCP server (standalone: `python3 server.py --help`)
-- `run_test.sh` - orchestrates one scenario end to end
-- `Makefile` - the scenarios
-- `results/` - logs, verdicts, and the generated MCP configs (gitignored)
+- `testbench.py` - orchestrates the scenarios (`python3 testbench.py --help`);
+  make is just a convenience wrapper around it
+- `Makefile` - the scenario shortcuts
+- `results/` - logs, verdicts, structured JSON results, generated MCP configs (gitignored)
