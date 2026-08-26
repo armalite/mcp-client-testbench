@@ -34,16 +34,29 @@ HERE = Path(__file__).resolve().parent
 RESULTS = HERE / "results"
 
 SCENARIOS = {
-    # name -> (server mode, duration override or None)
-    "headers": ("fast", None),
-    "silent": ("silent", None),
-    "progress": ("progress", None),
-    "sse-comments": ("sse-comments", None),
+    # name -> spec
+    "headers": {"mode": "fast"},
+    "silent": {"mode": "silent"},
+    "progress": {"mode": "progress"},
+    "sse-comments": {"mode": "sse-comments"},
     # Delivery control: same streaming format as `progress`, but the tool
     # finishes UNDER the timeout. If the client receives the result, the
     # server's SSE stream is proven consumable end to end, which rules out
     # "malformed stream" as an explanation for the timeout scenarios.
-    "control-under-timeout": ("progress", "half-timeout"),
+    "control-under-timeout": {"mode": "progress", "duration": "half-timeout"},
+    # Idle-timer pair: proves the client PROCESSES this server's progress
+    # notifications, not merely parses the stream. The client has a separate
+    # idle timeout (CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT) that resets on
+    # progress notifications. With idle=30s and a 45s tool:
+    #   idle-control (no progress) must abort at 30s (proves timer armed)
+    #   idle-reset (progress every 5s) must deliver at 45s (proves the
+    #   notifications reset the client's own timer machinery)
+    # Together with `progress` timing out, this isolates the finding: the
+    # hard timeout ignores notifications the client otherwise fully acts on.
+    "idle-control": {"mode": "silent", "duration": 45, "idle_ms": 30000,
+                     "omit_config_timeout": True},
+    "idle-reset": {"mode": "progress", "duration": 45, "idle_ms": 30000,
+                   "omit_config_timeout": True},
 }
 
 PROMPT = ("Call the probe tool from the testbench MCP server exactly once. "
@@ -82,10 +95,16 @@ def claude_version(claude_bin):
 
 
 def run_scenario(name, cfg):
-    mode, duration_override = SCENARIOS[name]
+    spec = SCENARIOS[name]
+    mode = spec["mode"]
     cfg = dict(cfg)
-    if duration_override == "half-timeout":
+    dur = spec.get("duration")
+    if dur == "half-timeout":
         cfg["duration"] = max(10, cfg["timeout_ms"] // 2000)
+    elif isinstance(dur, int):
+        cfg["duration"] = dur
+    idle_ms = spec.get("idle_ms")
+    omit_config_timeout = spec.get("omit_config_timeout", False)
     RESULTS.mkdir(exist_ok=True)
     server_log = RESULTS / f"{name}_server.log"
     client_log = RESULTS / f"{name}_client.log"
@@ -109,10 +128,17 @@ def run_scenario(name, cfg):
         if not wait_for_port(cfg["port"]):
             die(f"server did not start on port {cfg['port']} (busy? try --port)")
 
-        mcp_config.write_text(json.dumps({"mcpServers": {"testbench": {
-            "type": "http",
-            "url": f"http://127.0.0.1:{cfg['port']}/mcp",
-            "timeout": cfg["timeout_ms"]}}}))
+        server_entry = {"type": "http",
+                        "url": f"http://127.0.0.1:{cfg['port']}/mcp"}
+        if not omit_config_timeout:
+            server_entry["timeout"] = cfg["timeout_ms"]
+        mcp_config.write_text(json.dumps({"mcpServers": {"testbench": server_entry}}))
+
+        run_env = os.environ.copy()
+        if idle_ms is not None:
+            run_env["CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT"] = str(idle_ms)
+            print(f"(idle timeout set to {idle_ms}ms via env; "
+                  f"per-server timeout omitted from config)")
 
         client_budget = cfg["duration"] + cfg["timeout_ms"] // 1000 + 120
         started_at = datetime.now(timezone.utc).isoformat()
@@ -128,7 +154,8 @@ def run_scenario(name, cfg):
                  "--allowedTools", "mcp__testbench__probe",
                  "--max-turns", "3",
                  "--model", cfg["model"]],
-                capture_output=True, text=True, timeout=client_budget)
+                capture_output=True, text=True, timeout=client_budget,
+                env=run_env)
             client_out = (proc.stdout or "") + (proc.stderr or "")
         except subprocess.TimeoutExpired as e:
             client_out = ((e.stdout or "") if isinstance(e.stdout, str) else "")
@@ -161,15 +188,33 @@ def run_scenario(name, cfg):
 
     # Verdict
     timeout_match = re.search(r"timed out after (\d+)s", client_out)
+    idle_match = re.search(r"sent no response or progress for (\d+)s", client_out)
     if "PROBE_COMPLETED_OK" in client_out:
         outcome = "delivered"
         verdict = "TOOL RESULT DELIVERED: client received the completed result."
-        if mode != "fast" and cfg["duration"] > cfg["timeout_ms"] / 1000:
+        if name == "idle-reset":
+            verdict += (" The call outlived the 30s idle timeout, so the "
+                        "client PROCESSED this server's progress "
+                        "notifications and reset its IDLE timer on them. "
+                        "Note: this is the idle timer, NOT the hard "
+                        "per-call timeout that the progress/sse-comments "
+                        "scenarios show is never extended.")
+        elif mode != "fast" and cfg["duration"] > cfg["timeout_ms"] / 1000:
             verdict += (" (call survived past the configured timeout: "
                         "timer was extended or not enforced)")
         elif mode in ("progress", "sse-comments"):
             verdict += (" (delivery control passed: the client parses this "
                         "server's SSE stream end to end)")
+    elif idle_match:
+        outcome = "idle_timeout"
+        verdict = (f"CLIENT IDLE-TIMED OUT after {idle_match.group(1)}s "
+                   f"of no response or progress.")
+        if name == "idle-control":
+            verdict += (" Expected: proves the idle timer is armed, so the "
+                        "idle-reset scenario is a valid test.")
+        elif name == "idle-reset":
+            verdict += (" NOT expected: the client did not reset its idle "
+                        "timer on this server's progress notifications.")
     elif timeout_match:
         outcome = "timeout"
         verdict = f"CLIENT TIMED OUT: timed out after {timeout_match.group(1)}s"

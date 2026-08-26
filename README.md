@@ -40,7 +40,28 @@ Every `make test-*` target does the same five things:
 | `make test-progress` | takes 90s, sends spec-compliant JSON-RPC `notifications/progress` every 5s | The key question: do protocol-level progress notifications extend the client's timeout? |
 | `make test-sse-comments` | takes 90s, sends SSE comment keep-alives (`: keep-alive`) every 5s | Same question for transport-level keep-alives (what some vendors mean by "keep-alives") |
 | `make test-control` | streams the same way as test-progress but finishes UNDER the timeout (half of TIMEOUT_MS) | Delivery control: if the result arrives, the client demonstrably parses this server's SSE stream, ruling out "malformed stream" as the explanation for the timeout scenarios |
-| `make test-all` | all of the above | ~5-6 minutes total |
+| `make test-idle` | two runs with the client's idle timeout set to 30s and a 45s tool: one sending nothing, one sending progress every 5s | Proves the client PROCESSES the notifications, not just parses them: the no-progress run must idle-abort at 30s, the progress run must survive to 45s because the notifications reset the client's own idle timer |
+| `make test-all` | all of the above | ~7-8 minutes total |
+
+## Two different timers (do not confuse them)
+
+The Claude client runs two separate timers on every MCP tool call:
+
+1. **The hard per-call timeout.** A fixed cap on the whole call (set via
+   the per-server `timeout` config or the `MCP_TOOL_TIMEOUT` env var;
+   observed at 60000ms for claude.ai connectors). **This is the timer this
+   repo's finding is about**: nothing the server streams extends it. The
+   `silent`, `progress`, and `sse-comments` scenarios test this timer.
+2. **The idle timeout.** A separate "is the server still alive?" timer
+   (`CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT`, default 5 min for HTTP) that DOES
+   reset when progress notifications arrive. The `idle-control` and
+   `idle-reset` scenarios use this timer purely as an instrument: because
+   it resets on our notifications, it proves the client processes them.
+
+Do not read `idle-reset` succeeding as "keep-alives fix the timeout
+problem". It only proves the notifications are delivered and acted on.
+The finding is precisely that the hard per-call timeout (timer 1) ignores
+the same notifications that demonstrably reset timer 2.
 
 ## Reading the output
 
@@ -72,8 +93,12 @@ reporting `PROBE_COMPLETED_OK after 90s`.
 | silent | Times out at the configured limit (expected control) |
 | progress | Times out at exactly the configured limit despite delivered notifications |
 | sse-comments | Times out at exactly the configured limit despite delivered keep-alives |
+| idle-control | Idle-aborts at 30s (expected: idle timer armed) |
+| idle-reset | DELIVERED at 45s: the progress notifications reset the client's idle timer, proving the client fully processes them |
 
-Conclusion: nothing the server streams extends the client's timeout.
+Conclusion: the client demonstrably processes this server's progress
+notifications (they reset its idle timer), yet its hard per-call timeout is
+not extended by them or by SSE keep-alives.
 Matches https://github.com/anthropics/claude-code/issues/58687.
 
 One positive: the per-server `timeout` value in the MCP config IS honored
@@ -89,10 +114,12 @@ trusting this rig's correctness:
 2. `control-under-timeout` shows the client parses this server's stream
    end to end.
 3. `silent` shows the timeout's baseline behaviour when nothing arrives.
-4. `progress` and `sse-comments` then isolate the finding: the ONLY
-   difference from the passing control is that the tool takes longer than
-   the timeout. If they time out at exactly the configured limit, the
-   client's timeout is not extended by streamed events of either kind.
+4. `idle-control` and `idle-reset` show the client PROCESSES the progress
+   notifications: they reset its separate idle timer, which the control
+   proves is armed. This rules out "notifications silently discarded".
+5. `progress` and `sse-comments` then isolate the finding: notifications
+   the client demonstrably acts on do not extend the hard per-call timeout,
+   which fires at exactly the configured limit regardless.
 
 ## Prerequisites
 
