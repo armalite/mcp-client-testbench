@@ -63,26 +63,36 @@ claude version: 2.1.246 (Claude Code)      <- results are per client version
 A passing (extended-timeout) run would instead end with the client
 reporting `PROBE_COMPLETED_OK after 90s`.
 
-Results observed on claude-code 2.1.246 (Aug 2026): headers compliant;
-control-under-timeout DELIVERED (the client received the result through the
-same SSE stream that carries the progress notifications, proving the stream
-is consumable); silent times out (expected); progress and sse-comments BOTH
-still time out at exactly the configured timeout, i.e. nothing the server
-streams extends it. Matches
-https://github.com/anthropics/claude-code/issues/58687.
+## Baseline results (claude-code 2.1.246, Aug 2026)
+
+| Scenario | Result |
+|---|---|
+| headers | PASS: spec-compliant Accept headers on every request |
+| control-under-timeout | DELIVERED: result received through the same SSE stream that carries the progress notifications, so the stream is consumable |
+| silent | Times out at the configured limit (expected control) |
+| progress | Times out at exactly the configured limit despite delivered notifications |
+| sse-comments | Times out at exactly the configured limit despite delivered keep-alives |
+
+Conclusion: nothing the server streams extends the client's timeout.
+Matches https://github.com/anthropics/claude-code/issues/58687.
+
 One positive: the per-server `timeout` value in the MCP config IS honored
 for directly-configured servers, so local CLI users can raise their own
 cap. Connector users (claude.ai / Cowork) cannot; the platform sets it.
 
-How the five scenarios combine into one argument: `headers` shows the
-client asks for streams correctly; `control-under-timeout` shows this
-server's stream is parsed end to end by the client; `silent` shows the
-timeout's baseline behaviour; `progress` and `sse-comments` then isolate
-the finding, since the ONLY difference from the passing control is that the
-tool takes longer than the timeout. If those two time out at exactly the
-configured limit, the client's timeout is not extended by streamed events
-of either kind. No step relies on trusting this rig's correctness; each is
-verified by the scenario before it.
+## How the scenarios combine into one argument
+
+Each scenario is verified by the one before it, so no step relies on
+trusting this rig's correctness:
+
+1. `headers` shows the client asks for streams correctly.
+2. `control-under-timeout` shows the client parses this server's stream
+   end to end.
+3. `silent` shows the timeout's baseline behaviour when nothing arrives.
+4. `progress` and `sse-comments` then isolate the finding: the ONLY
+   difference from the passing control is that the tool takes longer than
+   the timeout. If they time out at exactly the configured limit, the
+   client's timeout is not extended by streamed events of either kind.
 
 ## Prerequisites
 
