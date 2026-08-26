@@ -39,7 +39,8 @@ Every `make test-*` target does the same five things:
 | `make test-silent` | takes 90s, sends nothing | Control case: confirms what the configured timeout does when nothing arrives. EXPECTED to time out |
 | `make test-progress` | takes 90s, sends spec-compliant JSON-RPC `notifications/progress` every 5s | The key question: do protocol-level progress notifications extend the client's timeout? |
 | `make test-sse-comments` | takes 90s, sends SSE comment keep-alives (`: keep-alive`) every 5s | Same question for transport-level keep-alives (what some vendors mean by "keep-alives") |
-| `make test-all` | all of the above | ~4-5 minutes total |
+| `make test-control` | streams the same way as test-progress but finishes UNDER the timeout (half of TIMEOUT_MS) | Delivery control: if the result arrives, the client demonstrably parses this server's SSE stream, ruling out "malformed stream" as the explanation for the timeout scenarios |
+| `make test-all` | all of the above | ~5-6 minutes total |
 
 ## Reading the output
 
@@ -63,12 +64,25 @@ A passing (extended-timeout) run would instead end with the client
 reporting `PROBE_COMPLETED_OK after 90s`.
 
 Results observed on claude-code 2.1.246 (Aug 2026): headers compliant;
-silent times out (expected); progress and sse-comments BOTH still time out
-at exactly the configured timeout, i.e. nothing the server streams extends
-it. Matches https://github.com/anthropics/claude-code/issues/58687.
+control-under-timeout DELIVERED (the client received the result through the
+same SSE stream that carries the progress notifications, proving the stream
+is consumable); silent times out (expected); progress and sse-comments BOTH
+still time out at exactly the configured timeout, i.e. nothing the server
+streams extends it. Matches
+https://github.com/anthropics/claude-code/issues/58687.
 One positive: the per-server `timeout` value in the MCP config IS honored
 for directly-configured servers, so local CLI users can raise their own
 cap. Connector users (claude.ai / Cowork) cannot; the platform sets it.
+
+How the five scenarios combine into one argument: `headers` shows the
+client asks for streams correctly; `control-under-timeout` shows this
+server's stream is parsed end to end by the client; `silent` shows the
+timeout's baseline behaviour; `progress` and `sse-comments` then isolate
+the finding, since the ONLY difference from the passing control is that the
+tool takes longer than the timeout. If those two time out at exactly the
+configured limit, the client's timeout is not extended by streamed events
+of either kind. No step relies on trusting this rig's correctness; each is
+verified by the scenario before it.
 
 ## Prerequisites
 

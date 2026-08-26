@@ -16,6 +16,7 @@ help:
 	@echo "  make test-silent        control: slow tool, nothing streamed -> expect timeout"
 	@echo "  make test-progress      slow tool + JSON-RPC progress notifications -> does the timeout extend?"
 	@echo "  make test-sse-comments  slow tool + SSE comment keep-alives -> does the timeout extend?"
+	@echo "  make test-control       streaming tool that finishes UNDER the timeout -> proves the SSE stream is consumable"
 	@echo "  make server             just run the server in the foreground (for manual poking)"
 	@echo "  make clean              delete results/"
 	@echo ""
@@ -33,6 +34,9 @@ test-progress:
 
 test-sse-comments:
 	@python3 testbench.py sse-comments
+
+test-control:
+	@python3 testbench.py control-under-timeout
 
 test-all:
 	@python3 testbench.py all

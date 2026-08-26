@@ -34,11 +34,16 @@ HERE = Path(__file__).resolve().parent
 RESULTS = HERE / "results"
 
 SCENARIOS = {
-    # name -> server mode
-    "headers": "fast",
-    "silent": "silent",
-    "progress": "progress",
-    "sse-comments": "sse-comments",
+    # name -> (server mode, duration override or None)
+    "headers": ("fast", None),
+    "silent": ("silent", None),
+    "progress": ("progress", None),
+    "sse-comments": ("sse-comments", None),
+    # Delivery control: same streaming format as `progress`, but the tool
+    # finishes UNDER the timeout. If the client receives the result, the
+    # server's SSE stream is proven consumable end to end, which rules out
+    # "malformed stream" as an explanation for the timeout scenarios.
+    "control-under-timeout": ("progress", "half-timeout"),
 }
 
 PROMPT = ("Call the probe tool from the testbench MCP server exactly once. "
@@ -77,7 +82,10 @@ def claude_version(claude_bin):
 
 
 def run_scenario(name, cfg):
-    mode = SCENARIOS[name]
+    mode, duration_override = SCENARIOS[name]
+    cfg = dict(cfg)
+    if duration_override == "half-timeout":
+        cfg["duration"] = max(10, cfg["timeout_ms"] // 2000)
     RESULTS.mkdir(exist_ok=True)
     server_log = RESULTS / f"{name}_server.log"
     client_log = RESULTS / f"{name}_client.log"
@@ -156,9 +164,12 @@ def run_scenario(name, cfg):
     if "PROBE_COMPLETED_OK" in client_out:
         outcome = "delivered"
         verdict = "TOOL RESULT DELIVERED: client received the completed result."
-        if mode != "fast":
+        if mode != "fast" and cfg["duration"] > cfg["timeout_ms"] / 1000:
             verdict += (" (call survived past the configured timeout: "
                         "timer was extended or not enforced)")
+        elif mode in ("progress", "sse-comments"):
+            verdict += (" (delivery control passed: the client parses this "
+                        "server's SSE stream end to end)")
     elif timeout_match:
         outcome = "timeout"
         verdict = f"CLIENT TIMED OUT: timed out after {timeout_match.group(1)}s"
