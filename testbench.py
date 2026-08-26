@@ -113,7 +113,12 @@ def run_scenario(name, cfg):
             proc = subprocess.run(
                 [cfg["claude_bin"], "-p", PROMPT,
                  "--mcp-config", str(mcp_config), "--strict-mcp-config",
-                 "--dangerously-skip-permissions", "--max-turns", "3",
+                 # Explicitly allowlist the probe tool. This works under
+                 # normal permission rules, including orgs whose managed
+                 # settings disable bypass-permissions mode (where
+                 # --dangerously-skip-permissions is silently ignored).
+                 "--allowedTools", "mcp__testbench__probe",
+                 "--max-turns", "3",
                  "--model", cfg["model"]],
                 capture_output=True, text=True, timeout=client_budget)
             client_out = (proc.stdout or "") + (proc.stderr or "")
