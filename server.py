@@ -14,7 +14,7 @@ Modes:
   sse-comments  SSE response; comment keep-alives (": keep-alive") every
                 --interval seconds, final result at --duration
 
-No third-party dependencies. Python 3.8+.
+No third-party dependencies. Python 3.10+.
 """
 import argparse
 import json
