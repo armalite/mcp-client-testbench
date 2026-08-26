@@ -43,6 +43,121 @@ Every `make test-*` target does the same five things:
 | `make test-idle` | two runs with the client's idle timeout set to 30s and a 45s tool: one sending nothing, one sending progress every 5s | Proves the client PROCESSES the notifications, not just parses them: the no-progress run must idle-abort at 30s, the progress run must survive to 45s because the notifications reset the client's own idle timer |
 | `make test-all` | all of the above | ~7-8 minutes total |
 
+## The core scenario, as a picture
+
+`test-progress`, the scenario that demonstrates the finding:
+
+```mermaid
+sequenceDiagram
+    participant C as Claude client
+    participant S as Test server (this repo)
+    C->>S: POST tools/call "probe" (client supplies progressToken)
+    Note over C: hard per-call timeout armed (60s)
+    S-->>C: SSE stream opens
+    loop every 5s, delivered and processed
+        S-->>C: notifications/progress (step n, correct token)
+    end
+    Note over C: 60s reached. Timer was never reset by the notifications
+    C--xS: "timed out after 60s" + notifications/cancelled, disconnects
+    Note over S: keeps working. Final result at +90s has nowhere to go
+```
+
+<details>
+<summary>Diagram: the delivery control (test-control), proving the stream is consumable</summary>
+
+```mermaid
+sequenceDiagram
+    participant C as Claude client
+    participant S as Test server
+    C->>S: POST tools/call "probe"
+    Note over C: hard timeout armed (60s)
+    S-->>C: SSE stream opens
+    loop every 5s
+        S-->>C: notifications/progress
+    end
+    S-->>C: final result at +30s (UNDER the timeout), via the same stream
+    Note over C: result received and parsed. The stream format is proven good
+```
+
+</details>
+
+<details>
+<summary>Diagram: the idle pair (test-idle), proving the notifications are processed</summary>
+
+Both runs set the client's separate idle timer to 30s and use a 45s tool.
+
+```mermaid
+sequenceDiagram
+    participant C as Claude client
+    participant S as Test server
+    Note over C,S: ARM 1 idle-control: server sends nothing
+    C->>S: tools/call "probe"
+    Note over C: idle timer armed (30s)
+    C--xS: aborts at 30s: "no response or progress for 30s"
+    Note over C,S: ARM 2 idle-reset: progress every 5s
+    C->>S: tools/call "probe"
+    loop every 5s
+        S-->>C: notifications/progress
+        Note over C: idle timer RESET by each notification
+    end
+    S-->>C: final result at +45s, delivered
+    Note over C,S: same notifications reset the idle timer but never the hard timeout
+```
+
+</details>
+
+<details>
+<summary>Diagram: header capture (test-headers)</summary>
+
+```mermaid
+sequenceDiagram
+    participant C as Claude client
+    participant S as Test server
+    C->>S: POST initialize / tools/list / tools/call
+    Note over S: logs every request's raw headers
+    S-->>C: instant result (fast mode)
+    Note over C,S: check the log: every POST should carry Accept: application/json, text/event-stream
+```
+
+</details>
+
+<details>
+<summary>Diagram: the baseline control (test-silent)</summary>
+
+```mermaid
+sequenceDiagram
+    participant C as Claude client
+    participant S as Test server
+    C->>S: POST tools/call "probe"
+    Note over C: hard per-call timeout armed (60s)
+    Note over S: works silently, sends nothing
+    C--xS: "timed out after 60s", disconnects
+    Note over S: final result at +90s has nowhere to go
+    Note over C,S: expected: shows what the timeout does when nothing arrives
+```
+
+</details>
+
+<details>
+<summary>Diagram: SSE comment keep-alives (test-sse-comments)</summary>
+
+```mermaid
+sequenceDiagram
+    participant C as Claude client
+    participant S as Test server
+    C->>S: POST tools/call "probe"
+    Note over C: hard per-call timeout armed (60s)
+    S-->>C: SSE stream opens
+    loop every 5s, delivered
+        S-->>C: ": keep-alive" (SSE comment, transport level)
+    end
+    Note over C: 60s reached. Comments never reset the timer either
+    C--xS: "timed out after 60s", disconnects
+    Note over C,S: same shape as test-progress, but with the other kind of keep-alive some vendors send
+```
+
+</details>
+
 ## Two different timers (do not confuse them)
 
 The Claude client runs two separate timers on every MCP tool call:
