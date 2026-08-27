@@ -57,6 +57,11 @@ SCENARIOS = {
                      "omit_config_timeout": True},
     "idle-reset": {"mode": "progress", "duration": 45, "idle_ms": 30000,
                    "omit_config_timeout": True},
+    # Same as idle-reset but with SSE comment keep-alives instead of
+    # JSON-RPC progress notifications: do transport-level comments reset
+    # the idle timer too, or only real progress notifications?
+    "idle-comments": {"mode": "sse-comments", "duration": 45, "idle_ms": 30000,
+                      "omit_config_timeout": True},
 }
 
 PROMPT = ("Call the probe tool from the testbench MCP server exactly once. "
@@ -192,7 +197,11 @@ def run_scenario(name, cfg):
     if "PROBE_COMPLETED_OK" in client_out:
         outcome = "delivered"
         verdict = "TOOL RESULT DELIVERED: client received the completed result."
-        if name == "idle-reset":
+        if name == "idle-comments":
+            verdict += (" The call outlived the 30s idle timeout, so SSE "
+                        "comment keep-alives DO reset the idle timer on "
+                        "this client version.")
+        elif name == "idle-reset":
             verdict += (" The call outlived the 30s idle timeout, so the "
                         "client PROCESSED this server's progress "
                         "notifications and reset its IDLE timer on them. "
@@ -215,6 +224,10 @@ def run_scenario(name, cfg):
         elif name == "idle-reset":
             verdict += (" NOT expected: the client did not reset its idle "
                         "timer on this server's progress notifications.")
+        elif name == "idle-comments":
+            verdict += (" SSE comment keep-alives did NOT reset the idle "
+                        "timer (only JSON-RPC progress notifications do; "
+                        "compare with idle-reset).")
     elif timeout_match:
         outcome = "timeout"
         verdict = f"CLIENT TIMED OUT: timed out after {timeout_match.group(1)}s"

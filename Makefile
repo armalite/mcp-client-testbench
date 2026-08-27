@@ -42,6 +42,7 @@ test-control:
 test-idle:
 	@python3 testbench.py idle-control
 	@python3 testbench.py idle-reset
+	@python3 testbench.py idle-comments
 
 test-all:
 	@python3 testbench.py all

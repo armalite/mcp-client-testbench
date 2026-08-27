@@ -40,7 +40,7 @@ Every `make test-*` target does the same five things:
 | `make test-progress` | takes 90s, sends spec-compliant JSON-RPC `notifications/progress` every 5s | The key question: do protocol-level progress notifications extend the client's timeout? |
 | `make test-sse-comments` | takes 90s, sends SSE comment keep-alives (`: keep-alive`) every 5s | Same question for transport-level keep-alives (what some vendors mean by "keep-alives") |
 | `make test-control` | streams the same way as test-progress but finishes UNDER the timeout (half of TIMEOUT_MS) | Delivery control: if the result arrives, the client demonstrably parses this server's SSE stream, ruling out "malformed stream" as the explanation for the timeout scenarios |
-| `make test-idle` | two runs with the client's idle timeout set to 30s and a 45s tool: one sending nothing, one sending progress every 5s | Proves the client PROCESSES the notifications, not just parses them: the no-progress run must idle-abort at 30s, the progress run must survive to 45s because the notifications reset the client's own idle timer |
+| `make test-idle` | three runs with the client's idle timeout set to 30s and a 45s tool: one sending nothing, one sending JSON-RPC progress every 5s, one sending SSE comments every 5s | Proves the client PROCESSES progress notifications (that run survives to 45s because they reset the idle timer), that the timer is genuinely armed (the silent run aborts at 30s), and that SSE comments do NOT reset it (that run also aborts at 30s despite delivered comments) |
 | `make test-all` | all of the above | ~7-8 minutes total |
 
 ## The core scenario, as a picture
@@ -82,9 +82,9 @@ sequenceDiagram
 </details>
 
 <details>
-<summary>Diagram: the idle pair (test-idle), proving the notifications are processed</summary>
+<summary>Diagram: the idle trio (test-idle), proving what does and doesn't reset the idle timer</summary>
 
-Both runs set the client's separate idle timer to 30s and use a 45s tool.
+All three runs set the client's separate idle timer to 30s and use a 45s tool.
 
 ```mermaid
 sequenceDiagram
@@ -102,6 +102,12 @@ sequenceDiagram
     end
     S-->>C: final result at +45s, delivered
     Note over C,S: same notifications reset the idle timer but never the hard timeout
+    Note over C,S: ARM 3 idle-comments: SSE comments every 5s
+    C->>S: tools/call "probe"
+    loop every 5s, delivered
+        S-->>C: ": keep-alive" (SSE comment)
+    end
+    C--xS: aborts at 30s: comments do NOT reset the idle timer either
 ```
 
 </details>
@@ -210,6 +216,7 @@ reporting `PROBE_COMPLETED_OK after 90s`.
 | sse-comments | Times out at exactly the configured limit despite delivered keep-alives |
 | idle-control | Idle-aborts at 30s (expected: idle timer armed) |
 | idle-reset | DELIVERED at 45s: the progress notifications reset the client's idle timer, proving the client fully processes them |
+| idle-comments | Idle-aborts at 30s despite delivered SSE comments: comment keep-alives reset neither the hard cap nor the idle timer |
 
 Conclusion: the client demonstrably processes this server's progress
 notifications (they reset its idle timer), yet its hard per-call timeout is
