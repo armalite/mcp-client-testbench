@@ -164,25 +164,34 @@ sequenceDiagram
 
 </details>
 
-## Two different timers (do not confuse them)
+## Three different timers (do not confuse them)
 
-The Claude client runs two separate timers on every MCP tool call:
+The Claude client runs three separate timers on every MCP tool call, all
+now documented at https://code.claude.com/docs/en/mcp (see the timeout
+section):
 
 1. **The hard per-call timeout.** A fixed cap on the whole call (set via
    the per-server `timeout` config or the `MCP_TOOL_TIMEOUT` env var;
-   observed at 60000ms for claude.ai connectors). **This is the timer this
-   repo's finding is about**: nothing the server streams extends it. The
-   `silent`, `progress`, and `sse-comments` scenarios test this timer.
-2. **The idle timeout.** A separate "is the server still alive?" timer
+   defaults to ~28 hours when neither is set; observed at 60000ms for
+   claude.ai connectors). **This is the timer this repo's finding is
+   about**: nothing the server streams extends it. The `silent`,
+   `progress`, and `sse-comments` scenarios test this timer.
+2. **The first-byte timer** (HTTP/SSE/connector servers only). 60 seconds
+   until the server's first response byte, raised automatically to match
+   timer 1's value when that is configured to 60s or higher. Any streaming
+   response satisfies it immediately, so this rig's streaming scenarios
+   never trip it, and raising timer 1 takes care of it.
+3. **The idle timeout.** A separate "is the server still alive?" timer
    (`CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT`, default 5 min for HTTP) that DOES
-   reset when progress notifications arrive. The `idle-control` and
-   `idle-reset` scenarios use this timer purely as an instrument: because
-   it resets on our notifications, it proves the client processes them.
+   reset when JSON-RPC progress notifications arrive, and does NOT reset
+   on SSE comment keep-alives. The `idle-control`, `idle-reset`, and
+   `idle-comments` scenarios test this timer, and double as the proof that
+   the client processes real progress notifications.
 
 Do not read `idle-reset` succeeding as "keep-alives fix the timeout
 problem". It only proves the notifications are delivered and acted on.
 The finding is precisely that the hard per-call timeout (timer 1) ignores
-the same notifications that demonstrably reset timer 2.
+the same notifications that demonstrably reset timer 3.
 
 ## Reading the output
 
@@ -239,9 +248,12 @@ trusting this rig's correctness:
 4. `idle-control` and `idle-reset` show the client PROCESSES the progress
    notifications: they reset its separate idle timer, which the control
    proves is armed. This rules out "notifications silently discarded".
-5. `progress` and `sse-comments` then isolate the finding: notifications
-   the client demonstrably acts on do not extend the hard per-call timeout,
-   which fires at exactly the configured limit regardless.
+5. `idle-comments` shows SSE comment keep-alives do NOT reset the idle
+   timer: only real JSON-RPC progress notifications count as activity.
+6. `progress` and `sse-comments` then isolate the finding: events the
+   client demonstrably receives (and, for progress notifications, acts on)
+   do not extend the hard per-call timeout, which fires at exactly the
+   configured limit regardless.
 
 ## Prerequisites
 
